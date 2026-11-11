@@ -57,9 +57,14 @@ const readBody = (req) =>
         req.on('error', reject);
     });
 
+const visibleTo = (share) =>
+    (share.visibility ?? 'shared') === 'shared' || share.createdBy === USER;
+
 const toVersion = (share, v) => ({
     slug: share.slug,
     title: share.title,
+    visibility: share.visibility ?? 'shared',
+    owner: share.createdBy ?? share.versions[0].publishedBy,
     version: v.version,
     format: v.format,
     diagram: v.diagram ?? null,
@@ -122,16 +127,19 @@ const server = http.createServer(async (req, res) => {
 
         if (parts.length === 1 && req.method === 'GET') {
             return send(req, res, 200, {
-                shares: Object.values(store.shares).map((s) => {
-                    const last = s.versions[s.versions.length - 1];
-                    return {
-                        slug: s.slug,
-                        title: s.title,
-                        latestVersion: last.version,
-                        updatedAt: last.publishedAt,
-                        updatedBy: last.publishedBy,
-                    };
-                }),
+                shares: Object.values(store.shares)
+                    .filter(visibleTo)
+                    .map((s) => {
+                        const last = s.versions[s.versions.length - 1];
+                        return {
+                            slug: s.slug,
+                            title: s.title,
+                            latestVersion: last.version,
+                            updatedAt: last.publishedAt,
+                            updatedBy: last.publishedBy,
+                            visibility: s.visibility ?? 'shared',
+                        };
+                    }),
             });
         }
 
@@ -146,9 +154,13 @@ const server = http.createServer(async (req, res) => {
                 return send(req, res, 400, { error: 'bad_payload' });
             if (store.shares[b.slug])
                 return send(req, res, 409, { error: 'slug_taken' });
+            if (b.visibility && !['private', 'shared'].includes(b.visibility))
+                return send(req, res, 400, { error: 'invalid' });
             const share = {
                 slug: b.slug,
                 title: String(b.title || b.slug),
+                visibility: b.visibility || 'shared',
+                createdBy: USER,
                 versions: [newVersion(b, 1)],
             };
             store.shares[b.slug] = share;
@@ -157,7 +169,8 @@ const server = http.createServer(async (req, res) => {
         }
 
         const share = store.shares[parts[1]];
-        if (!share) return send(req, res, 404, { error: 'not_found' });
+        if (!share || !visibleTo(share))
+            return send(req, res, 404, { error: 'not_found' });
         const latest = share.versions[share.versions.length - 1];
 
         if (parts.length === 2 && req.method === 'GET') {
@@ -189,6 +202,23 @@ const server = http.createServer(async (req, res) => {
             return v
                 ? send(req, res, 200, toVersion(share, v))
                 : send(req, res, 404, { error: 'not_found' });
+        }
+        if (
+            parts[2] === 'visibility' &&
+            parts.length === 3 &&
+            req.method === 'POST'
+        ) {
+            const b = await readBody(req);
+            if (b.visibility !== 'shared')
+                return send(req, res, 400, { error: 'invalid' });
+            if ((share.createdBy ?? USER) !== USER)
+                return send(req, res, 403, { error: 'forbidden' });
+            share.visibility = 'shared';
+            save(store);
+            return send(req, res, 200, {
+                slug: share.slug,
+                visibility: 'shared',
+            });
         }
         if (
             parts[2] === 'versions' &&

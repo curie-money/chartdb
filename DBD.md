@@ -51,6 +51,8 @@ POST sends it as `X-CSRF-Token`.
 type ShareVersion = {
   slug: string;            // ^[a-z0-9][a-z0-9-]{1,62}$, stable link id
   title: string;
+  visibility: 'private' | 'shared'; // private: only `owner` can see it at all
+  owner: string;           // email of the share's creator
   version: number;         // 1, 2, 3 … per slug
   format: 'chartdb' | 'dbml';  // 'chartdb' = full diagram JSON (UI publishes);
                                // 'dbml' = DBML only (agent publishes; laid out on import)
@@ -69,14 +71,23 @@ type ShareVersion = {
 | Method + path | Body | Success | Errors |
 |---|---|---|---|
 | `GET /session` | — | `{ user: {email, name}, canPublish: boolean, csrfToken?: string }` | 401 not signed in |
-| `GET /shares` | — | `{ shares: [{slug, title, latestVersion, updatedAt, updatedBy}] }` | |
-| `POST /shares` | `{slug, title, note, format, diagram, dbml, databaseType}` | 201 `ShareVersion` (version 1) | 400 bad slug · 403 no publish permission · 409 `{error:'slug_taken'}` |
+| `GET /shares` | — | `{ shares: [{slug, title, visibility, latestVersion, updatedAt, updatedBy}] }` — shared ones and your private ones | |
+| `POST /shares` | `{slug, title, visibility, note, format, diagram, dbml, databaseType}` (`visibility` defaults to `shared`) | 201 `ShareVersion` (version 1) | 400 bad slug or visibility · 403 no publish permission · 409 `{error:'slug_taken'}` |
+| `POST /shares/:slug/visibility` | `{visibility: 'shared'}` | 200 `{slug, visibility}` | 400 anything but `shared` (one-way) · 403 not the creator · 404 |
 | `GET /shares/:slug` | — | `ShareVersion` (latest) | 404 |
 | `GET /shares/:slug/versions` | — | `{ versions: [{version, note, publishedBy, publishedAt, source}] }` newest first | 404 |
 | `GET /shares/:slug/versions/:n` | — | `ShareVersion` | 404 |
 | `POST /shares/:slug/versions` | `{baseVersion, force, note, format, diagram, dbml, databaseType}` | 201 `ShareVersion` (latest + 1) | 403 · 404 · 409 `{error:'stale_base', latestVersion, publishedBy, publishedAt}` when `baseVersion < latest` and `force` is false |
 
 Versions are append-only: nothing updates or deletes a version row.
+
+A **private** share behaves like a shared one for its creator — versions,
+conflict check, merge, MCP — and does not exist for anyone else: every
+endpoint answers 404 for it, exactly as for an unused slug. Slugs are global,
+so a slug held privately is still `slug_taken` for others. A private share
+can be made shared (one-way); the Share dialog offers "Only me" or
+"Everyone with the DB designer role" when creating, and "Share with the team"
+on a private one.
 
 ## Browser-side link state
 

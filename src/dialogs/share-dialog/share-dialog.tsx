@@ -20,6 +20,7 @@ import {
     toSlug,
     type DbdSession,
     type ShareVersion,
+    type ShareVisibility,
     type StaleBaseConflict,
 } from '@/lib/dbd/api';
 import {
@@ -87,6 +88,13 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         diagram: Diagram;
     } | null>(null);
     const [reviewError, setReviewError] = useState<string | null>(null);
+    // New shares: private to me, or shared with the team.
+    const [visibility, setVisibility] = useState<ShareVisibility>('private');
+    // The linked share's visibility and creator, from its latest version.
+    const [shareInfo, setShareInfo] = useState<{
+        visibility: ShareVisibility;
+        owner: string;
+    } | null>(null);
     // What "Bring in their changes" took from the newer version, shown once.
     const [broughtIn, setBroughtIn] = useState<{
         version: number;
@@ -100,6 +108,10 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                 dbdApi.getVersion(forLink.slug, forLink.version),
                 dbdApi.getLatest(forLink.slug),
             ]);
+            setShareInfo({
+                visibility: latestShared.visibility ?? 'shared',
+                owner: latestShared.owner ?? '',
+            });
             setBaseDiagram(await diagramFromShareVersion(baseShared));
             setLatest(
                 latestShared.version > forLink.version
@@ -128,6 +140,8 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         setLatest(null);
         setReviewError(null);
         setBroughtIn(null);
+        setShareInfo(null);
+        setVisibility('private');
         setPhase({ kind: 'loading' });
         dbdApi
             .session()
@@ -353,6 +367,10 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             };
             setLink(currentDiagram.id, next);
             setLinkState(next);
+            setShareInfo({
+                visibility: published.visibility ?? 'shared',
+                owner: published.owner ?? '',
+            });
             setPhase({ kind: 'done', published });
             clearHighlights();
         },
@@ -377,6 +395,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                           ...payload,
                           slug,
                           title: title.trim() || currentDiagram.name,
+                          visibility,
                       });
                 remember(published);
             } catch (err) {
@@ -394,8 +413,37 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                 setPhase({ kind: 'error', message });
             }
         },
-        [currentDiagram, link, note, slug, title, remember, loadReview]
+        [
+            currentDiagram,
+            link,
+            note,
+            slug,
+            title,
+            visibility,
+            remember,
+            loadReview,
+        ]
     );
+
+    // One-way: a private design becomes visible to the team.
+    const makeShared = useCallback(async () => {
+        if (!link) return;
+        setPhase({ kind: 'working' });
+        try {
+            await dbdApi.makeShared(link.slug);
+            setShareInfo((info) =>
+                info ? { ...info, visibility: 'shared' } : info
+            );
+            setPhase({ kind: 'ready' });
+        } catch (err) {
+            setPhase({
+                kind: 'error',
+                message: `Could not share it: ${String(
+                    (err as Error)?.message ?? err
+                )}`,
+            });
+        }
+    }, [link]);
 
     const copy = useCallback(async (text: string) => {
         try {
@@ -518,8 +566,10 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                 return (
                     <div className="flex flex-col gap-2 text-sm">
                         <p>
-                            Published version <b>{phase.published.version}</b>.
-                            Anyone with the link gets this version.
+                            Published version <b>{phase.published.version}</b>.{' '}
+                            {phase.published.visibility === 'private'
+                                ? 'Private: only you can open this link.'
+                                : 'Anyone with the link gets this version.'}
                         </p>
                         <div className="flex gap-2">
                             <Input readOnly value={url} />
@@ -547,6 +597,35 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                             {copied ? 'Copied' : 'Copy'}
                         </Button>
                     </div>
+                    {shareInfo?.visibility === 'private' ? (
+                        <div className="flex flex-col gap-1 rounded-md border p-2 text-xs">
+                            <p>
+                                <b>Private</b>: only you can open this link or
+                                see it in the list.
+                            </p>
+                            {canPublish &&
+                            shareInfo.owner === session?.user.email ? (
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="self-start"
+                                    disabled={busy}
+                                    onClick={makeShared}
+                                >
+                                    Share with the team
+                                </Button>
+                            ) : null}
+                            <span className="text-muted-foreground">
+                                Sharing is one-way: a shared design cannot be
+                                made private again.
+                            </span>
+                        </div>
+                    ) : shareInfo ? (
+                        <p className="text-xs text-muted-foreground">
+                            Shared: everyone with the DB designer role can open
+                            this link.
+                        </p>
+                    ) : null}
                     {broughtIn ? (
                         <div className="rounded-md border border-green-300 bg-green-50 p-2 text-xs dark:border-green-800 dark:bg-green-950/40">
                             <p className="font-medium">
@@ -611,6 +690,44 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                         onChange={(e) => setTitle(e.target.value)}
                     />
                 </div>
+                <fieldset className="flex flex-col gap-1">
+                    <legend className="mb-1 text-sm font-medium">
+                        Who can open it
+                    </legend>
+                    {(
+                        [
+                            [
+                                'private',
+                                'Only me',
+                                'A personal design: saved and versioned, but only you see it. You can share it later.',
+                            ],
+                            [
+                                'shared',
+                                'Everyone with the DB designer role',
+                                'Listed for the team; anyone with the role can open it and publish new versions.',
+                            ],
+                        ] as const
+                    ).map(([value, label, help]) => (
+                        <label
+                            key={value}
+                            className="flex cursor-pointer items-start gap-2 rounded-md border p-2"
+                        >
+                            <input
+                                type="radio"
+                                name="dbd-visibility"
+                                className="mt-1"
+                                checked={visibility === value}
+                                onChange={() => setVisibility(value)}
+                            />
+                            <span className="flex flex-col">
+                                <span>{label}</span>
+                                <span className="text-xs text-muted-foreground">
+                                    {help}
+                                </span>
+                            </span>
+                        </label>
+                    ))}
+                </fieldset>
                 <div className="flex flex-col gap-1">
                     <Label htmlFor="dbd-slug">Link name</Label>
                     <Input
@@ -684,8 +801,10 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                     <Spinner className="size-4" />
                 ) : link ? (
                     'Publish new version'
+                ) : visibility === 'private' ? (
+                    'Save privately'
                 ) : (
-                    'Create link'
+                    'Create shared link'
                 )}
             </Button>
         );
