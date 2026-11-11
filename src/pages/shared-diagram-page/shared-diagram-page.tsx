@@ -11,6 +11,8 @@ import { ThemeProvider } from '@/context/theme-context/theme-provider';
 import { dbdApi, DbdApiError, type ShareVersion } from '@/lib/dbd/api';
 import { diagramFromShareVersion } from '@/lib/dbd/payload';
 import { clearHighlights } from '@/lib/dbd/highlight';
+import { diffDiagrams, isEmptyDiff } from '@/lib/dbd/diff';
+import { setUpdateNotice } from '@/lib/dbd/update-notice';
 import {
     getDiagramIdForSlug,
     getLinkForDiagram,
@@ -38,8 +40,14 @@ const SharedDiagramComponent: React.FC = () => {
     // Writes the shared version into local storage under `id` (replacing
     // whatever is there) and binds that id to the link.
     const importAs = useCallback(
-        async (shared: ShareVersion, id: string, bind: boolean) => {
-            const imported = await diagramFromShareVersion(shared);
+        async (
+            shared: ShareVersion,
+            id: string,
+            bind: boolean,
+            converted?: Diagram
+        ) => {
+            const imported =
+                converted ?? (await diagramFromShareVersion(shared));
             const now = new Date();
             const diagram: Diagram = {
                 ...imported,
@@ -92,8 +100,20 @@ const SharedDiagramComponent: React.FC = () => {
         const link = localId ? getLinkForDiagram(localId) : null;
         const local =
             localId && link?.slug === slug
-                ? await getDiagram(localId)
+                ? await getDiagram(localId, {
+                      includeTables: true,
+                      includeRelationships: true,
+                      includeAreas: true,
+                  })
                 : undefined;
+
+        // A link to one specific version (/s/<slug>/v/<n>) that differs from
+        // the version your copy is on opens beside it: following a link to
+        // an older version must never roll your copy back.
+        if (version && local && link && link.version !== shared.version) {
+            await importAs(shared, generateDiagramId(), false);
+            return;
+        }
 
         if (!localId || !link || !local) {
             await importAs(shared, generateDiagramId(), true);
@@ -114,7 +134,23 @@ const SharedDiagramComponent: React.FC = () => {
             navigate(`/diagrams/${localId}`, { replace: true });
             return;
         }
-        await importAs(shared, localId, true);
+        // No unpublished edits: move the copy to the new version without
+        // asking, but leave a notice of what that version changed, so
+        // nothing disappears from the screen unannounced.
+        const incoming = await diagramFromShareVersion(shared);
+        const diff = diffDiagrams(local, incoming);
+        if (!isEmptyDiff(diff)) {
+            setUpdateNotice(localId, {
+                slug,
+                fromVersion: link.version,
+                toVersion: shared.version,
+                publishedBy: shared.publishedBy,
+                publishedAt: shared.publishedAt,
+                note: shared.note,
+                diff,
+            });
+        }
+        await importAs(shared, localId, true, incoming);
     }, [slug, version, getDiagram, importAs, navigate]);
 
     useEffect(() => {

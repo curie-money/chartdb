@@ -3,6 +3,7 @@ import { Share2 } from 'lucide-react';
 import { Button } from '@/components/button/button';
 import { ShareDialog } from '@/dialogs/share-dialog/share-dialog';
 import { DbdHighlightLegend } from './dbd-highlight-legend';
+import { DbdUpdateNotice } from './dbd-update-notice';
 
 export const ShareButton: React.FC = () => {
     const [open, setOpen] = useState(false);
@@ -18,6 +19,7 @@ export const ShareButton: React.FC = () => {
             </Button>
             <ShareDialog open={open} onOpenChange={setOpen} />
             <DbdHighlightLegend />
+            <DbdUpdateNotice />
         </>
     );
 };
