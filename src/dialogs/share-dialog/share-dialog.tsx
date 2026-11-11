@@ -37,6 +37,11 @@ import {
 } from '@/lib/dbd/highlight';
 import { isEmptyDiff } from '@/lib/dbd/diff';
 import {
+    mergeDiagrams,
+    type MergeConflict,
+    type Resolution,
+} from '@/lib/dbd/merge';
+import {
     clearLink,
     getLinkForDiagram,
     hasEditsSinceSync,
@@ -55,13 +60,18 @@ type Phase =
     | { kind: 'ready' }
     | { kind: 'working' }
     | { kind: 'conflict'; conflict: StaleBaseConflict }
+    | {
+          kind: 'merge';
+          conflicts: MergeConflict[];
+          resolutions: Record<string, Resolution>;
+      }
     | { kind: 'done'; published: ShareVersion };
 
 export const ShareDialog: React.FC<ShareDialogProps> = ({
     open,
     onOpenChange,
 }) => {
-    const { currentDiagram } = useChartDB();
+    const { currentDiagram, updateDiagramData } = useChartDB();
     const [session, setSession] = useState<DbdSession | null>(null);
     const [link, setLinkState] = useState<DiagramLink | null>(null);
     const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
@@ -77,6 +87,11 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         diagram: Diagram;
     } | null>(null);
     const [reviewError, setReviewError] = useState<string | null>(null);
+    // What "Bring in their changes" took from the newer version, shown once.
+    const [broughtIn, setBroughtIn] = useState<{
+        version: number;
+        applied: string[];
+    } | null>(null);
 
     const loadReview = useCallback(async (forLink: DiagramLink) => {
         setReviewError(null);
@@ -112,6 +127,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         setBaseDiagram(null);
         setLatest(null);
         setReviewError(null);
+        setBroughtIn(null);
         setPhase({ kind: 'loading' });
         dbdApi
             .session()
@@ -156,6 +172,72 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     const overlap = useMemo(
         () => new Set(mine && theirs ? overlappingTables(mine, theirs) : []),
         [mine, theirs]
+    );
+
+    // Applies their changes since the version this copy was taken from onto
+    // this copy, then moves the copy's base to their version, so the next
+    // Publish is an ordinary one on top of theirs. Conflicts (both changed
+    // the same table or column differently) are asked first.
+    const bringIn = useCallback(
+        async (resolutions?: Record<string, Resolution>) => {
+            if (!link || !baseDiagram || !latest) return;
+            const result = mergeDiagrams(
+                baseDiagram,
+                currentDiagram,
+                latest.diagram,
+                resolutions ?? {}
+            );
+            if (!resolutions && result.conflicts.length > 0) {
+                setPhase({
+                    kind: 'merge',
+                    conflicts: result.conflicts,
+                    resolutions: {},
+                });
+                return;
+            }
+            setPhase({ kind: 'working' });
+            try {
+                // Compare the result with their version: if nothing of mine
+                // is left (no edits, or every conflict went their way), the
+                // copy now is their version and there is nothing to publish.
+                const hasOwnChanges = !isEmptyDiff(
+                    diffDiagrams(latest.diagram, result.diagram)
+                );
+                await updateDiagramData(
+                    { ...result.diagram, updatedAt: new Date() },
+                    { forceUpdateStorage: true }
+                );
+                const next: DiagramLink = {
+                    slug: link.slug,
+                    version: latest.shared.version,
+                    syncedAt: hasOwnChanges ? link.syncedAt : Date.now(),
+                };
+                setLink(currentDiagram.id, next);
+                setLinkState(next);
+                clearHighlights();
+                setBroughtIn({
+                    version: latest.shared.version,
+                    applied: result.applied,
+                });
+                await loadReview(next);
+                setPhase({ kind: 'ready' });
+            } catch (err) {
+                setPhase({
+                    kind: 'error',
+                    message: `Could not bring in their changes: ${String(
+                        (err as Error)?.message ?? err
+                    )}`,
+                });
+            }
+        },
+        [
+            link,
+            baseDiagram,
+            latest,
+            currentDiagram,
+            updateDiagramData,
+            loadReview,
+        ]
     );
 
     const renderReview = () => {
@@ -207,6 +289,25 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                         >
                             Open version {latest.shared.version} in a new tab
                         </button>
+                        {session?.canPublish && baseDiagram ? (
+                            <div className="flex flex-col gap-1">
+                                <Button
+                                    size="sm"
+                                    className="self-start"
+                                    disabled={phase.kind === 'working'}
+                                    onClick={() => bringIn()}
+                                >
+                                    Bring in their changes
+                                </Button>
+                                <span className="text-xs text-muted-foreground">
+                                    Adds their changes to your copy and keeps
+                                    yours, so you publish on top of version{' '}
+                                    {latest.shared.version} without losing
+                                    theirs. You choose where you both changed
+                                    the same thing.
+                                </span>
+                            </div>
+                        ) : null}
                     </div>
                 ) : null}
                 {mine ? (
@@ -316,6 +417,74 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     const canPublish = session?.canPublish ?? false;
     const busy = phase.kind === 'working';
 
+    const renderMerge = (
+        p: Extract<Phase, { kind: 'merge' }>
+    ): React.ReactNode => {
+        const choose = (key: string, r: Resolution) =>
+            setPhase({ ...p, resolutions: { ...p.resolutions, [key]: r } });
+        return (
+            <div className="flex flex-col gap-3 text-sm">
+                <p>
+                    You both changed{' '}
+                    {p.conflicts.length === 1 ? 'this' : 'these'} since version{' '}
+                    {link?.version}. Choose which to keep; every other change
+                    from both of you is kept automatically.
+                </p>
+                <ul className="flex flex-col gap-2">
+                    {p.conflicts.map((c) => {
+                        const picked = p.resolutions[c.key];
+                        return (
+                            <li
+                                key={c.key}
+                                className="flex flex-col gap-1 rounded-md border p-2"
+                            >
+                                <span className="font-mono text-xs font-medium">
+                                    {c.field
+                                        ? `${c.table}.${c.field}`
+                                        : c.table}
+                                </span>
+                                <div className="flex flex-wrap gap-2">
+                                    <Button
+                                        size="sm"
+                                        variant={
+                                            picked === 'mine'
+                                                ? 'default'
+                                                : 'outline'
+                                        }
+                                        aria-pressed={picked === 'mine'}
+                                        onClick={() => choose(c.key, 'mine')}
+                                    >
+                                        {picked === 'mine' ? '✓ ' : ''}Keep
+                                        mine:{' '}
+                                        <span className="ml-1 font-mono">
+                                            {c.mine}
+                                        </span>
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant={
+                                            picked === 'theirs'
+                                                ? 'default'
+                                                : 'outline'
+                                        }
+                                        aria-pressed={picked === 'theirs'}
+                                        onClick={() => choose(c.key, 'theirs')}
+                                    >
+                                        {picked === 'theirs' ? '✓ ' : ''}Take
+                                        theirs:{' '}
+                                        <span className="ml-1 font-mono">
+                                            {c.theirs}
+                                        </span>
+                                    </Button>
+                                </div>
+                            </li>
+                        );
+                    })}
+                </ul>
+            </div>
+        );
+    };
+
     const renderBody = () => {
         switch (phase.kind) {
             case 'loading':
@@ -328,14 +497,18 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                 return (
                     <p className="text-sm text-destructive">{phase.message}</p>
                 );
+            case 'merge':
+                return renderMerge(phase);
             case 'conflict':
                 return (
                     <div className="flex flex-col gap-3 text-sm">
                         <p>
                             Version {phase.conflict.latestVersion} was published
-                            after you took version {link?.version}. Publishing
-                            anyway makes yours the latest version; theirs stays
-                            in the history.
+                            after you took version {link?.version}.{' '}
+                            <b>Bring in their changes</b> to keep both, or{' '}
+                            <b>Publish anyway</b> to make your copy the latest
+                            as it is: their changes listed below would then be
+                            missing from it (they stay in the history).
                         </p>
                         {renderReview()}
                     </div>
@@ -374,6 +547,27 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                             {copied ? 'Copied' : 'Copy'}
                         </Button>
                     </div>
+                    {broughtIn ? (
+                        <div className="rounded-md border border-green-300 bg-green-50 p-2 text-xs dark:border-green-800 dark:bg-green-950/40">
+                            <p className="font-medium">
+                                Brought in version {broughtIn.version}
+                                {broughtIn.applied.length
+                                    ? ':'
+                                    : ' (nothing to add).'}
+                            </p>
+                            {broughtIn.applied.length ? (
+                                <ul className="mt-1 font-mono">
+                                    {broughtIn.applied.map((line) => (
+                                        <li key={line}>{line}</li>
+                                    ))}
+                                </ul>
+                            ) : null}
+                            <p className="mt-1">
+                                Check the diagram, then publish to share the
+                                combined version.
+                            </p>
+                        </div>
+                    ) : null}
                     <p className="text-muted-foreground">
                         Your copy is based on version {link.version}.{' '}
                         {editedSinceSync
@@ -454,6 +648,17 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     };
 
     const renderPrimary = () => {
+        if (phase.kind === 'merge') {
+            const done = phase.conflicts.every((c) => phase.resolutions[c.key]);
+            return (
+                <Button
+                    disabled={!done}
+                    onClick={() => bringIn(phase.resolutions)}
+                >
+                    Bring in their changes
+                </Button>
+            );
+        }
         if (phase.kind === 'conflict') {
             return (
                 <Button onClick={() => publish(true)}>Publish anyway</Button>
@@ -469,6 +674,9 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         }
         return (
             <Button
+                // While a newer version is waiting, bringing it in is the
+                // step to take first; publishing would be refused anyway.
+                variant={latest ? 'outline' : 'default'}
                 disabled={busy || (!link && !slugValid)}
                 onClick={() => publish(false)}
             >

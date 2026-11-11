@@ -36,10 +36,10 @@ export interface DiagramDiff {
     groupMoves: GroupMove[];
 }
 
-const tableKey = (t: Pick<DBTable, 'schema' | 'name'>) =>
+export const tableKey = (t: Pick<DBTable, 'schema' | 'name'>) =>
     t.schema && t.schema !== 'public' ? `${t.schema}.${t.name}` : t.name;
 
-const describeField = (f: DBField): string => {
+export const describeField = (f: DBField): string => {
     let type = f.type?.name ?? '?';
     if (f.characterMaximumLength) type += `(${f.characterMaximumLength})`;
     else if (f.precision != null)
@@ -70,7 +70,7 @@ const relationshipKeys = (diagram: Diagram): Set<string> => {
     return keys;
 };
 
-const groupOf = (diagram: Diagram): Map<string, string | null> => {
+export const groupOf = (diagram: Diagram): Map<string, string | null> => {
     const areas = diagram.areas ?? [];
     const byId = new Map(areas.map((a) => [a.id, a]));
     const result = new Map<string, string | null>();

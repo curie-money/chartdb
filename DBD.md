@@ -17,7 +17,7 @@ same operations as MCP tools at `/mcp/dbd`.
 
 | File | Change |
 |---|---|
-| `src/lib/dbd/*` | API client, publish payload builder, local link store, version diff, change highlight store |
+| `src/lib/dbd/*` | API client, publish payload builder, local link store, version diff, three-way merge (`merge.ts`), change highlight store, update notice |
 | `src/lib/dbml/dbml-table-groups.ts` | DBML `TableGroup` ↔ area, hooked into `dbml-import.ts` / `dbml-export.ts` (a few lines each) |
 | `src/pages/editor-page/canvas/table-node/*` | change outline + badge on tables, tint on changed columns (one hook each in `table-node.tsx` / `table-node-field.tsx`) |
 | `src/pages/editor-page/top-navbar/dbd-highlight-legend.tsx` | legend + clear for the highlight |
@@ -85,8 +85,13 @@ The editor remembers which local diagram belongs to which link in `localStorage`
 Opening a link:
 
 - no local copy → import it and remember the link;
-- local copy with no edits since it was last synced → replace it in place;
-- local copy with unsaved edits → ask: replace mine, open as a separate copy, or keep mine.
+- local copy with no edits since it was last synced → replace it in place, and
+  show a notice in the editor of what that version changed, with anything it
+  removed from your copy called out (`dbd-update-notice.tsx`);
+- local copy with unsaved edits → ask: replace mine, open as a separate copy, or keep mine;
+- a link to one specific version (`/s/<slug>/v/<n>`) that differs from the
+  version your linked copy is on → opens as a separate "(vN)" copy, so an old
+  link never rolls your copy back.
 
 ## Groups (DBML `TableGroup` ↔ ChartDB area)
 
@@ -118,3 +123,26 @@ they added that your copy does not have are listed in the legend. The highlight
 is display-only (`src/lib/dbd/highlight.ts`): it is never written to the diagram,
 so it is not saved or published. It clears on Clear, on Publish, and when a
 shared version is imported.
+
+## Bringing in their changes (three-way merge)
+
+When someone published after the version you took, the Publish dialog offers
+**Bring in their changes** (`src/lib/dbd/merge.ts`). It takes the version you
+started from (base), your copy (mine) and the latest version (theirs), matched
+by table and column name:
+
+- a change only they made is applied to your copy; a change only you made is
+  kept; the same change on both sides is applied once;
+- tables they added come with their relationships and land inside the group
+  of the same name in your copy; groups they added or removed, and tables they
+  moved between groups, follow;
+- where you both changed the same column, or one side removed a table the
+  other changed, the dialog asks per item: keep mine or take theirs.
+
+Your copy is then based on the latest version, so the next Publish is an
+ordinary one on top of theirs and nothing of theirs is dropped. "Publish
+anyway" is still there for when you mean to replace their version.
+
+Not merged: indexes and check constraints of tables both sides kept (yours
+win), notes, custom types and dependencies.
+
