@@ -4,10 +4,21 @@ import { visualizer } from 'rollup-plugin-visualizer';
 import path from 'path';
 import UnpluginInjectPreload from 'unplugin-inject-preload/vite';
 
+// Curie dbd: mango serves this build under /dbd/. Must end with "/".
+const basePath = (process.env.VITE_BASE_PATH ?? '/').replace(/\/?$/, '/');
+
 // https://vitejs.dev/config/
 export default defineConfig({
+    base: basePath,
     plugins: [
         react(),
+        {
+            // index.html loads the runtime config with an absolute "/config.js";
+            // keep it under the base path.
+            name: 'dbd-config-js-base',
+            transformIndexHtml: (html) =>
+                html.replace('src="/config.js"', `src="${basePath}config.js"`),
+        },
         visualizer({
             filename: './stats/stats.html',
             open: false,

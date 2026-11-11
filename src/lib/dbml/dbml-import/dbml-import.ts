@@ -31,6 +31,10 @@ import {
     getPositionFromIndex,
 } from './dbml-import-error';
 import { validateCheckConstraintWithDetails } from '@/lib/check-constraints/check-constraints-validator';
+import {
+    applyTableGroupsAsAreas,
+    extractTableGroups,
+} from '@/lib/dbml/dbml-table-groups';
 
 export const defaultDBMLDiagramName = 'DBML Import';
 
@@ -1083,16 +1087,20 @@ export const importDBMLToDiagram = async (
             }
         );
 
-        return {
-            id: generateDiagramId(),
-            name: defaultDBMLDiagramName,
-            databaseType: options?.databaseType ?? DatabaseType.GENERIC,
-            tables,
-            relationships,
-            customTypes,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-        };
+        // Curie dbd: TableGroups become areas (see dbml-table-groups.ts).
+        return applyTableGroupsAsAreas(
+            {
+                id: generateDiagramId(),
+                name: defaultDBMLDiagramName,
+                databaseType: options?.databaseType ?? DatabaseType.GENERIC,
+                tables,
+                relationships,
+                customTypes,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+            },
+            extractTableGroups(dbmlContent)
+        );
     } catch (error) {
         console.error('DBML parsing error:', error);
         throw error;
