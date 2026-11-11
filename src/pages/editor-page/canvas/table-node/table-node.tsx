@@ -50,6 +50,8 @@ import {
     TooltipTrigger,
 } from '@/components/tooltip/tooltip';
 import { useDiff } from '@/context/diff-context/use-diff';
+import { SIDE_STYLES, useTableMark } from '@/lib/dbd/highlight';
+import { TableNodeDbdBadge } from './table-node-dbd-badge';
 import { TableNodeStatus } from './table-node-status/table-node-status';
 import { TableEditMode } from './table-edit-mode/table-edit-mode';
 import { useCanvas } from '@/hooks/use-canvas';
@@ -136,6 +138,8 @@ export const TableNode: React.FC<NodeProps<TableNodeType>> = React.memo(
         } = useDiff();
 
         const fields = useMemo(() => table.fields, [table.fields]);
+        // Curie dbd: display-only change highlight (see lib/dbd/highlight.ts)
+        const dbdMark = useTableMark(table.id);
 
         // Effect to manage field count when entering/exiting edit mode
         useEffect(() => {
@@ -380,9 +384,11 @@ export const TableNode: React.FC<NodeProps<TableNodeType>> = React.memo(
                         ? 'outline outline-[3px] outline-red-500 dark:outline-red-900 outline-offset-[5px]'
                         : editTableMode
                           ? 'invisible'
-                          : ''
+                          : '',
+                    dbdMark ? SIDE_STYLES[dbdMark.side].outline : ''
                 ),
             [
+                dbdMark,
                 selected,
                 isOverlapping,
                 highlightOverlappingTables,
@@ -492,6 +498,7 @@ export const TableNode: React.FC<NodeProps<TableNodeType>> = React.memo(
                         table={table}
                         focused={focused}
                     />
+                    {dbdMark ? <TableNodeDbdBadge mark={dbdMark} /> : null}
                     <TableNodeStatus
                         status={
                             isDiffNewTable

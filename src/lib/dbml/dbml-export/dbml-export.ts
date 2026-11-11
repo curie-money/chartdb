@@ -7,6 +7,7 @@ import type { DBCustomType } from '@/lib/domain/db-custom-type';
 import { DBCustomTypeKind } from '@/lib/domain/db-custom-type';
 import { validateCheckConstraint } from '@/lib/check-constraints/check-constraints-validator';
 import type { DBRelationship } from '@/lib/domain/db-relationship';
+import { generateTableGroupsDBML } from '@/lib/dbml/dbml-table-groups';
 
 // Use DBCustomType for generating Enum DBML
 const generateEnumsDBML = (customTypes: DBCustomType[] | undefined): string => {
@@ -1550,6 +1551,15 @@ export function generateDBMLFromDiagram(diagram: Diagram): DBMLExportResult {
             // Clean up trailing whitespace/newlines and add proper spacing
             standard =
                 standard.trimEnd() + '\n\n' + cardinalityAwareRefs + '\n';
+        }
+
+        // Curie dbd: areas are written as TableGroups so grouping survives DBML.
+        const tableGroupsDbml = generateTableGroupsDBML({
+            ...finalDiagramForExport,
+            areas: finalDiagramForExport.areas ?? diagram.areas,
+        });
+        if (tableGroupsDbml) {
+            standard = standard.trimEnd() + '\n\n' + tableGroupsDbml + '\n';
         }
 
         // Prepend Enum DBML to the standard output

@@ -129,6 +129,16 @@ const routes: RouteObject[] = [
             };
         },
     },
+    ...['s/:slug', 's/:slug/v/:version'].map((path) => ({
+        path,
+        async lazy() {
+            const { SharedDiagramPage } =
+                await import('./pages/shared-diagram-page/shared-diagram-page');
+            return {
+                element: <SharedDiagramPage />,
+            };
+        },
+    })),
     {
         path: '*',
         async lazy() {
@@ -141,4 +151,6 @@ const routes: RouteObject[] = [
     },
 ];
 
-export const router = createBrowserRouter(routes);
+export const router = createBrowserRouter(routes, {
+    basename: import.meta.env.BASE_URL.replace(/\/$/, '') || '/',
+});

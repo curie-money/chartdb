@@ -36,6 +36,7 @@ import {
 } from './table-node-dependency-indicator';
 import { useCanvas } from '@/hooks/use-canvas';
 import { useLayout } from '@/hooks/use-layout';
+import { SIDE_STYLES, useFieldMark } from '@/lib/dbd/highlight';
 
 export const LEFT_HANDLE_ID_PREFIX = 'left_rel_';
 export const RIGHT_HANDLE_ID_PREFIX = 'right_rel_';
@@ -91,6 +92,8 @@ export const TableNodeField: React.FC<TableNodeFieldProps> = React.memo(
     }) => {
         const { relationships, readonly, highlightedCustomType, databaseType } =
             useChartDB();
+        // Curie dbd: display-only change highlight (see lib/dbd/highlight.ts)
+        const dbdFieldMark = useFieldMark(field.id);
 
         const updateNodeInternals = useUpdateNodeInternals();
         const connection = useConnection();
@@ -348,6 +351,7 @@ export const TableNodeField: React.FC<TableNodeFieldProps> = React.memo(
                 className={cn(
                     'group relative flex h-8 items-center justify-between gap-1 border-t px-3 text-sm last:rounded-b-[6px] hover:bg-slate-100 dark:hover:bg-slate-800',
                     'transition-all duration-200 ease-in-out',
+                    dbdFieldMark ? SIDE_STYLES[dbdFieldMark.side].row : '',
                     {
                         'bg-pink-100 dark:bg-pink-900':
                             highlighted && !isCustomTypeHighlighted,
