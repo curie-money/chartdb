@@ -2,6 +2,11 @@ import { DBD_API_BASE } from '@/lib/env';
 
 export type ShareFormat = 'chartdb' | 'dbml';
 
+// 'private': only the creator can list, open or publish to it.
+// 'shared': everyone with the DB designer role. Private can become shared,
+// never the reverse.
+export type ShareVisibility = 'private' | 'shared';
+
 export interface ShareVersion {
     slug: string;
     title: string;
@@ -14,6 +19,9 @@ export interface ShareVersion {
     publishedBy: string;
     publishedAt: string;
     source: 'ui' | 'mcp';
+    // Absent from servers that predate private designs: treat as shared.
+    visibility?: ShareVisibility;
+    owner?: string;
 }
 
 export interface DbdSession {
@@ -124,8 +132,20 @@ export const dbdApi = {
             `/shares/${enc(slug)}/versions/${version}`
         ),
 
-    createShare: (params: { slug: string; title: string } & PublishPayload) =>
-        request<ShareVersion>('POST', '/shares', params),
+    createShare: (
+        params: {
+            slug: string;
+            title: string;
+            visibility: ShareVisibility;
+        } & PublishPayload
+    ) => request<ShareVersion>('POST', '/shares', params),
+
+    makeShared: (slug: string) =>
+        request<{ slug: string; visibility: ShareVisibility }>(
+            'POST',
+            `/shares/${enc(slug)}/visibility`,
+            { visibility: 'shared' }
+        ),
 
     publishVersion: (
         slug: string,
