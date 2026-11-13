@@ -24,6 +24,16 @@ export interface ShareVersion {
     owner?: string;
 }
 
+/** One entry of a share's history (no diagram body). */
+export interface ShareVersionMeta {
+    version: number;
+    note: string;
+    publishedBy: string;
+    publishedAt: string;
+    source: string;
+    format: ShareFormat;
+}
+
 export interface DbdSession {
     user: { email: string; name: string };
     canPublish: boolean;
@@ -130,6 +140,13 @@ export const dbdApi = {
         request<ShareVersion>(
             'GET',
             `/shares/${enc(slug)}/versions/${version}`
+        ),
+
+    /** History of a share, newest first. Cheap: no diagram bodies. */
+    listVersions: (slug: string) =>
+        request<{ versions: ShareVersionMeta[] }>(
+            'GET',
+            `/shares/${enc(slug)}/versions`
         ),
 
     createShare: (

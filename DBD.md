@@ -23,6 +23,7 @@ same operations as MCP tools at `/mcp/dbd`.
 | `src/pages/editor-page/top-navbar/dbd-highlight-legend.tsx` | legend + clear for the highlight |
 | `src/dialogs/share-dialog/share-dialog.tsx` | Share (first time) / Publish (new version) dialog |
 | `src/pages/editor-page/top-navbar/share-button.tsx` | Share button in the top bar (replaces the GitHub stars iframe) |
+| `src/pages/editor-page/top-navbar/dbd-latest-sync.tsx` | keeps a linked copy on the latest version (see Browser-side link state) |
 | `src/pages/shared-diagram-page/shared-diagram-page.tsx` | `/s/:slug` and `/s/:slug/v/:version` — import a shared version and open it |
 | `src/router.tsx` | the two routes above; router `basename` follows the Vite base |
 | `vite.config.ts` | `VITE_BASE_PATH` (default `/`, mango uses `/dbd/`) |
@@ -102,7 +103,16 @@ Opening a link:
 - local copy with unsaved edits → ask: replace mine, open as a separate copy, or keep mine;
 - a link to one specific version (`/s/<slug>/v/<n>`) that differs from the
   version your linked copy is on → opens as a separate "(vN)" copy, so an old
-  link never rolls your copy back.
+  link never rolls your copy back. A first copy from a `/v/<n>` link is linked
+  only when `<n>` is the latest version; otherwise it is a separate "(vN)" copy.
+
+**Always the latest version.** Opening the designer directly (`/`, `/diagrams/<id>`,
+"Open diagram") also checks a linked copy against mango (`GET /shares/{slug}/versions`,
+no diagram bodies), on open and again when the tab regains focus (at most every 30 s):
+a copy with no unpublished edits is moved to the latest version through the
+shared-link page (same notice as above); a copy with unpublished edits is never
+touched — a banner offers **Review and bring in their changes**, which opens the
+Publish dialog (`dbd-latest-sync.tsx`). Unlinked "(vN)" copies are left alone.
 
 ## Groups (DBML `TableGroup` ↔ ChartDB area)
 
