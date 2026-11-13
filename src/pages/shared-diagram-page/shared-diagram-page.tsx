@@ -30,6 +30,15 @@ type State =
           localVersion: number;
       };
 
+const isLatest = async (slug: string, version: number) => {
+    try {
+        const { versions } = await dbdApi.listVersions(slug);
+        return versions.every((v) => v.version <= version);
+    } catch {
+        return false;
+    }
+};
+
 const SharedDiagramComponent: React.FC = () => {
     const { slug = '', version } = useParams();
     const navigate = useNavigate();
@@ -116,7 +125,11 @@ const SharedDiagramComponent: React.FC = () => {
         }
 
         if (!localId || !link || !local) {
-            await importAs(shared, generateDiagramId(), true);
+            // A first copy from a /v/<n> link stays bound to the share only
+            // when <n> is the latest: a linked copy is always kept on the
+            // latest version, which would undo opening an older one.
+            const bind = version ? await isLatest(slug, shared.version) : true;
+            await importAs(shared, generateDiagramId(), bind);
             return;
         }
 
